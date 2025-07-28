@@ -1,5 +1,6 @@
 import re
-
+import pandas as pd
+import html
 heading_patterns = [
     r'^\d+\.',                # 1.
     r'^\d+\.\d+(\.\d+)*',     # 1.1, 2.3.4
@@ -57,7 +58,10 @@ def extract_blocks_and_distributions(html_string): # Match each full <p> block
         font_sizes.append(font_size)
 
         line_heights.append(float(line_height))
-    return results
+    if results:
+        return pd.DataFrame(results)# ,columns=["top", "left", "line_height", "font_size", "font_family","bold", "italic", "text", "word_count", "word_density"])
+    else:
+        return pd.DataFrame(columns=["top", "left", "line_height", "font_size", "font_family","bold", "italic", "text", "word_count", "word_density"])
 
 def extract_crucial_pattern_lines(dflist):
     dfcrucial_pattern = []
@@ -119,7 +123,7 @@ def filter_and_clean_gibberish(
     # Matches known valid structured tokens: 1., 3.1, v2.0, etc.
     structured_pattern = re.compile(r'^(v)?\d+(\.\d+)*\.?$|^[a-zA-Z]\.$|^[a-zA-Z]\)$')
 
-    def is_meaningful(token):
+    def is_meaningful(token):   
         token = token.strip()
         if not token:
             return False
@@ -155,8 +159,33 @@ def filter_and_clean_gibberish(
             return None
 
         return cleaned
-
+    if df.empty or []:
+        return df
     df = df.copy()
     df[text_column] = df[text_column].apply(clean_text)
     df = df[df[text_column].notna()].reset_index(drop=True)
     return df
+
+def decode_text_in_dflist_to_utf8(dflist, text_column='text'):
+    """
+    Decodes HTML entities (e.g., &#x414;) in the specified text column of each DataFrame in dflist.
+    
+    Parameters:
+        dflist (list of pd.DataFrame): List of DataFrames representing pages.
+        text_column (str): The name of the column to decode. Defaults to 'text'.
+    
+    Returns:
+        list of pd.DataFrame: Updated list with decoded text content.
+    """
+    updated_dflist = []
+    
+    for df in dflist:
+        if df.empty:
+            updated_dflist.append(df)
+            continue
+        df = df.copy()
+        if text_column in df.columns:
+            df[text_column] = df[text_column].astype(str).apply(html.unescape)
+        updated_dflist.append(df)
+    
+    return updated_dflist

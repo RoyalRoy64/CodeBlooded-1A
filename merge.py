@@ -1,4 +1,4 @@
-
+import pandas as pd
 def merge_consecutive_same_font_and_left(dflist, target_fonts, acceptable_spacing_range=[0.0, 2.0]):
     """
     Merges lines within each DataFrame in dflist where:
@@ -91,3 +91,26 @@ def merge_consecutive_same_font_and_left(dflist, target_fonts, acceptable_spacin
         updated_dflist.append(df)
 
     return updated_dflist
+
+
+def combine_dflist_to_master_df(dflist):
+    """
+    Combines a list of page-level DataFrames into a single master DataFrame.
+    Adds a 'page_number' column to indicate the source page for each row.
+    Parameters:
+        dflist (list of pd.DataFrame): A list where each DataFrame corresponds to one PDF page.
+    Returns:
+        pd.DataFrame: Combined DataFrame with an added 'page_number' column.
+    """
+    combined_rows = []
+    for page_number, df in enumerate(dflist):
+        if df is not None and not df.empty:
+            df_copy = df.copy()
+            df_copy['page_number'] = page_number
+            combined_rows.append(df_copy)
+
+    if not combined_rows:
+        return pd.DataFrame()  # Return empty DataFrame if nothing valid
+
+    master_df = pd.concat(combined_rows, ignore_index=True)
+    return master_df

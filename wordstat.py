@@ -1,4 +1,4 @@
-
+import numpy as np
 def recalculate_word_stats(dflist):
     """
     Recalculates word count and word density (words per font size)

@@ -1,208 +1,143 @@
 import pymupdf
 # import pymupdf4llm
-import pathlib
+from pathlib import Path
 import pandas as pd
 import numpy as np
-from pprint import pprint
 import re
+import html
+import json
+
 from collections import Counter
-from extractandclean    import extract_blocks_and_distributions , extract_heading_summary , extract_crucial_pattern_lines , filter_and_clean_gibberish
-from merge              import merge_consecutive_same_font_and_left
-from headerfooter       import find_alternate_page_repeats_splitv2 , find_alternate_page_repeats_split , clean_pages_of_even_odd_repeats
-from tables             import extract_table_with_title
+from extractandclean    import extract_blocks_and_distributions , extract_heading_summary , extract_crucial_pattern_lines , filter_and_clean_gibberish , decode_text_in_dflist_to_utf8
+from merge              import merge_consecutive_same_font_and_left , combine_dflist_to_master_df
+from headerfooter       import find_alternate_page_repeats_split , clean_pages_of_even_odd_repeats
+from tables             import extract_all_tables_with_titles
 from fontstat           import generate_font_stats , get_global_font_counter , get_rare_large_fonts , map_fonts_to_heading_levels , get_significant_large_fonts , create_font_level_map , get_top_fonts , classify_font_size
-from analyzeandcompute  import unify_close_left_values , analyze_left_distribution , analyze_left_clusters , analyze_line_spacing , compute_word_count_stats , compute_line_spacing_per_page
-# md_text = pymupdf4llm.to_markdown(fileinquestion)
-# pathlib.Path("output.md").write_bytes(md_text.encode())
-# llama_reader = pymupdf4llm.LlamaMarkdownReader()
-# print(llama_reader())
-# llama_docs = llama_reader.load_data(fileinquestion)
+from analyzeandcompute  import unify_close_left_values , analyze_left_distribution , analyze_left_clusters , analyze_line_spacing , compute_word_count_stats , compute_line_spacing_per_page , detect_column_structure_by_clusters , enrich_masterdf_with_heading_signals  , extract_zoned_rows_from_masterdf , write_outline_json ,assign_heading_levels
 
+#workflow
+"""
+    1. Input file (string)
+    2. Extract Blocks to List of DF
+    3. Unify Close Left Values
+    4. Find and Clean Headers and Footers
+    5. Extract Tables
+    6. Extract crucial pattern lines
+    7. Merge consecutive same font and left
+    8. Font Stats , left distribution , line spacing
+"""
 #tesseract ocr
-# english
-# russian
-# chinese (new)
-# mandarin (traditional)
-# japanese
-# Hindi
-# Arabic
-# French
-# Hebrew
-# German
-# Korean
-# Italian
-# Polish
-# Portugese
-# Spanish 
-# Indonesian3
-#turkish
-# Urdu
-#pip install pymupdf numpy pandas sentence-transformers
-#################### workflow
-#parallel processing
-#trigger - 
-def combine_dflist_to_master_df(dflist):
-    """
-    Combines a list of page-level DataFrames into a single master DataFrame.
-    Adds a 'page_number' column to indicate the source page for each row.
-    Parameters:
-        dflist (list of pd.DataFrame): A list where each DataFrame corresponds to one PDF page.
-    Returns:
-        pd.DataFrame: Combined DataFrame with an added 'page_number' column.
-    """
-    combined_rows = []
-    for page_number, df in enumerate(dflist):
-        if df is not None and not df.empty:
-            df_copy = df.copy()
-            df_copy['page_number'] = page_number
-            combined_rows.append(df_copy)
-
-    if not combined_rows:
-        return pd.DataFrame()  # Return empty DataFrame if nothing valid
-
-    master_df = pd.concat(combined_rows, ignore_index=True)
-    return master_df
-
-fileinquestion = "C1A/input/E0CCG5S239.pdf" #single page doc E0CCG5S239
-fileinquestion = "C1A/input/TOPJUMP-PARTY-INVITATION-20161003-V01.pdf"
-fileinquestion = "C1A/input/STEMPathwaysFlyer.pdf"
-fileinquestion = "CustomPDFs/killer.pdf"
-fileinquestion = "CustomPDFs/jess401.pdf"
-fileinquestion = "C1A/input/E0CCG5S312.pdf"   #easy
-fileinquestion = "C1A/input/E0H1CM114.pdf" ######### hard
-doc = pymupdf.open(fileinquestion)  
-page = doc[0]  # first page
-width , height = page.rect.width , page.rect.height
-doctoc = doc.get_toc()
-docmetadata = doc.metadata
-totalpage= doc.page_count
-dflist   = []
-mid = totalpage//2
-
-for i in range(totalpage):
-    page = doc.load_page(i)
-    html = page.get_text("html")
-    blocks= extract_blocks_and_distributions(html)
-    dflist.append(pd.DataFrame(blocks))############### to dict if we do async
-dfl = dflist
-even_df, odd_df =   find_alternate_page_repeats_splitv2(dflist, mid=totalpage // 2)
-dflist          =   clean_pages_of_even_odd_repeats(dflist, even_df, odd_df)
-dflist          =   [filter_and_clean_gibberish(df, min_alnum_ratio=0.15, min_length=1) for df in dflist] 
-averagewords    =   compute_word_count_stats(dflist)['global_avg_words_per_line']
-font_stats_df   =   generate_font_stats(dflist)
-
-dflist = unify_close_left_values(dflist, tolerance=width*0.01, min_left=0, max_left=width)
-
-################add it back
-#['page_number', 'font_size', 'font_family', 'count', 'total_words','avg_word_density']
-# fontfamily_counter = Counter(font_stats_df['font_family'])
-# fontsize_counter = Counter(font_stats_df['font_size'])
-
-font_word_counts = (font_stats_df.groupby('font_size')['total_words'].sum().sort_values(ascending=False) )
-# master_df = combine_dflist_to_master_df(dflist)
-target_fonts = get_significant_large_fonts(font_word_counts, z_thresh=0.5)['large_fonts']
-# print("Large fonts:", result['large_fonts']) #print("Z-scores:\n", result['z_scores']) #print("Body font:", result['body_font'])
-
-spacing_list = compute_line_spacing_per_page(dflist)
-all_spacings = np.concatenate(spacing_list)# If you want to concatenate all spacing into a single array:
-spacing_stats = analyze_line_spacing(spacing_list)
-meansp =  spacing_stats['mean_spacing']
-
-dflist = merge_consecutive_same_font_and_left(dflist,list(font_word_counts.keys()),[meansp*0.4,meansp*1.75])
-leftdf = analyze_left_distribution(dflist)['left_stats_df'] # 'left_counter': left_counter,# 'dominant_lefts': dominant_lefts,# 'left_stats_df': left_stats_df
-leftdf.loc[(leftdf.left<=204) & (leftdf.percentage>=1)]
-
-master_df = combine_dflist_to_master_df(dflist)
-
-column_order = ['page_number',  'left',"top", 'end' ,"text",'line_height','font_size','font_family','bold','italic','word_count','word_density','parabool']
-master_df['left'] = master_df['left'].round(2)
-
-sortmm = (master_df.loc[master_df.left<width*0.35])
-unique_lefts = sorted(set(val for val in sortmm['left'].unique()))
+#pip install pymupdf numpy pandas
 
 
+input_dir = Path("/app/input")
+output_dir = Path("/app/output")
+input_dir = Path('/input')
+output_dir = Path('/output')
 
-df_summary = analyze_left_clusters([master_df], unique_lefts) #uniql are ascending
-testingdf = (master_df.loc[(master_df.left==unique_lefts[0])& (master_df.word_count<=10)][['top','line_height','font_size','bold','italic','text','word_count','parabool']])
-print(font_word_counts)
+output_dir.mkdir(parents=True, exist_ok=True)
+pdf_files = list(input_dir.glob("*.pdf"))
+
+for pdf_file in pdf_files:
+    doc = pymupdf.open(pdf_file)
+    totalpage = doc.page_count
+
+    # Handle empty PDF case
+    if totalpage == 0:
+        write_outline_json(None, output_dir, pdf_file, title="")
+        print(f"Skipped empty PDF: {pdf_file.name}")
+        continue  # <== Skip further processing for this file
+
+    page = doc[0]
+    width, height = page.rect.width, page.rect.height
+    doctoc = doc.get_toc()
+    docmetadata = doc.metadata
+    dflist = []
+    mid = totalpage // 2
+    for i in range(totalpage):
+        page = doc.load_page(i)
+        html = page.get_text("html")
+        blocks= extract_blocks_and_distributions(html)
+        dflist.append(pd.DataFrame(blocks))
+    dflist = decode_text_in_dflist_to_utf8(dflist)
+    dflist = unify_close_left_values(dflist, tolerance=width*0.01, min_left=0, max_left=width)
 
 
+    # for df in dflist:
+    #     if not df.empty:
+    dflist   =   [filter_and_clean_gibberish(df, min_alnum_ratio=0.15, min_length=1) for df in dflist] 
 
-HEADING_PATTERNS = [
-    r"^\d+\.",                # 1.
-    r"^\d+\.\d+(\.\d+)*",  # 1.1, 2.3.4
-    r"^\d+\)",               # 1)
-    r"^[A-Z]\.",             # A.
-    r"^[a-z]\)",             # a)
-    r"^[ivxlcdm]+\)",        # i), ii), iv)
-    r"^[IVXLCDM]+\)",        # I), II)
-    r"^[a-z]\.",             # a.
-    r"^[IVXLCDM]+\.",        # I.
-    r"^\u2022\s*",          # • bullet
-    r"^-\s*",                # - bullet
-    r"^\*\s*",              # * bullet
-]
+    dfcrucial = extract_crucial_pattern_lines(dflist)
 
-HEADING_REGEX = re.compile("|".join(HEADING_PATTERNS))
-
-
-def extract_heading_candidates(df, body_font_size=11.0, max_words=10):
-    """
-    Extract likely heading lines from a DataFrame based on font size, boldness, left alignment,
-    and text content pattern.
-
-    Parameters:
-        df (pd.DataFrame): The input DataFrame with line-level text data.
-        body_font_size (float): Estimated body font size threshold.
-        max_words (int): Maximum word count for heading candidates.
-
-    Returns:
-        pd.DataFrame: Filtered DataFrame containing heading candidates with a new column 'heading_level'.
-    """
-    df = df.copy()
+    even_df, odd_df =   find_alternate_page_repeats_split(dflist, mid=totalpage // 2)
+    dflist, removed_pages = clean_pages_of_even_odd_repeats(dflist, even_df, odd_df)
+    print("Removed header/footer from pages:", removed_pages)
     
-    # Apply pattern-based heading detection
-    def is_heading_pattern(text):
-        return bool(HEADING_REGEX.match(text.strip()))
+    average_words_per_line_per_column    =   compute_word_count_stats(dflist)['global_avg_words_per_line']
+    font_stats_df = generate_font_stats(dflist)
+    fontsize_word_counts = pd.Series(dtype=float)  # empty default
 
-    df['is_heading_pattern'] = df['text'].astype(str).apply(is_heading_pattern)
+    if (
+        not font_stats_df.empty and
+        'font_size' in font_stats_df.columns and
+        'total_words' in font_stats_df.columns
+    ):
+        fontsize_word_counts = (
+            font_stats_df.groupby('font_size')['total_words']
+            .sum()
+            .sort_values(ascending=False)
+        )
+        major_fonts = get_significant_large_fonts(fontsize_word_counts, z_thresh=0.55)['large_fonts']
+        minor_fonts = get_significant_large_fonts(fontsize_word_counts, z_thresh=-0.45)['large_fonts']
+    else:
+        major_fonts = []
+        minor_fonts = []
 
-    # Basic rule-based heading detection
-    df['heading_candidate'] = (
-        (df['font_size'] > body_font_size) |
-        (df['bold']) |
-        (df['italic']) |
-        (df['is_heading_pattern'])
-    ) & (df['word_count'] <= max_words)
+    mean_lineheight = analyze_line_spacing(compute_line_spacing_per_page(dflist))['mean_spacing']
+    merged_dflist = merge_consecutive_same_font_and_left(dflist,list(fontsize_word_counts.keys()),[mean_lineheight*0.4,mean_lineheight*1.75])
 
-    heading_df = df[df['heading_candidate']].copy()
+    leftdf = analyze_left_distribution(dflist)['left_stats_df'] # 'left_counter': left_counter,# 'dominant_lefts': dominant_lefts,# 'left_stats_df': left_stats_df
+    leftdf.loc[(leftdf.left<=204) & (leftdf.percentage>=1)]
+    
+    notmasterdf = combine_dflist_to_master_df(dflist)
+    master_df = combine_dflist_to_master_df(merged_dflist)
+    title = docmetadata['title']
+    if title == '':
+        # Fallback 1: Use first page with most words
+        page_word_counts = [(i, len(df['text'])) for i, df in enumerate(dflist) if not df.empty and 'text' in df.columns]
+        if page_word_counts:
+            # Get the page with the maximum words
+            best_page_index = max(page_word_counts, key=lambda x: x[1])[0]
+            df_top = dflist[best_page_index]
 
-    # Assign heading levels dynamically
-    grouped = heading_df.groupby(['font_size', 'bold', 'italic'])
-    groups = sorted(grouped.groups.keys(), key=lambda k: (-k[0], -int(k[1]), -int(k[2])))
+            # Get top 3 fonts (by count)
+            if 'font_family' in df_top.columns:
+                top_fonts = df_top['font_family'].value_counts().head(3).index.tolist()
+                title = ", ".join(top_fonts)
+            else:
+                title = pdf_file.stem
+        else:
+            # Fallback 2: Use filename
+            title = pdf_file.stem
+    if master_df.empty or notmasterdf.empty:
+        write_outline_json(None, output_dir, pdf_file, title=title) 
+    else:
+        master_df['left'] = master_df['left'].round(2)
+        notmasterdf['left'] = notmasterdf['left'].round(2)
+        leftstatdf = analyze_left_distribution([notmasterdf])['left_stats_df'] # 'left_counter': left_counter,# 'dominant_lefts': dominant_lefts,# 'left_stats_df': left_stats_df
 
-    # Heading level assignment logic
-    level_map = {}
-    levels = ['H1', 'H2', 'H3']
-    for i, group_key in enumerate(groups[:6]):
-        if len(groups) <= 3:
-            level_map[group_key] = levels[i]
-        elif len(groups) == 4:
-            level_map[group_key] = levels[0] if i < 2 else levels[2]
-        elif len(groups) == 5:
-            level_map[group_key] = levels[0] if i == 0 else (levels[1] if i < 3 else levels[2])
-        elif len(groups) >= 6:
-            level_map[group_key] = levels[i // 2]  # two each
-
-    heading_df['heading_level'] = heading_df.apply(
-        lambda row: level_map.get((row['font_size'], row['bold'], row['italic']), 'H3'), axis=1
-    )
-
-    return heading_df.reset_index(drop=True)
-
-
-heading_candidatesL1 = extract_heading_candidates(testingdf, body_font_size=11.0, max_words=10)
-heading_candidatesL2 = extract_heading_candidates(testingdf, body_font_size=11.0, max_words=10)
-heading_candidatesL3 = extract_heading_candidates(testingdf, body_font_size=11.0, max_words=10)
-
-print(heading_candidates)
+        wordandfontsize_limit_masterdf = (master_df.loc[master_df.word_count<11])
+        unique_left_sorted = np.array(sorted(set(val for val in wordandfontsize_limit_masterdf['left'].unique())))
+        num_cols = detect_column_structure_by_clusters(leftstatdf, page_width=width, tolerance=25)
+        enricheddf = enrich_masterdf_with_heading_signals(master_df, num_cols, page_width=width)
+        top_candidates = extract_zoned_rows_from_masterdf(
+            master_df=master_df,
+            removed_pages=removed_pages,     # or None
+            major_fonts=major_fonts,         # precomputed list/set of sizes
+            num_cols=num_cols,
+            page_width=width,
+            page_height=height
+        )
+        enriched_top_candidates = assign_heading_levels(top_candidates)
+        write_outline_json(enriched_top_candidates, output_dir, pdf_file, title=title)
+        print(f"Finished processing {pdf_file.name} — {title}")

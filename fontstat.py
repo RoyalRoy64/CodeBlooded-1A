@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+from collections import Counter
+
 def generate_font_stats(dflist):
     all_stats = []
 
@@ -30,6 +32,8 @@ def get_global_font_counter(font_stats_df):
     Aggregates font counts across all pages from font_stats_df
     to recreate a usable font_counter object.
     """
+    if font_stats_df.empty:
+        return Counter()
     return Counter(dict(
         font_stats_df.groupby('font_size')['count'].sum()
     ))
