@@ -58,7 +58,8 @@ def analyze_left_distribution(dflist):
 
     for page_num, df in enumerate(dflist):
         if 'left' in df.columns and not df.empty:
-            all_lefts.extend(np.round(df['left'].dropna(), 2))
+            valid_lefts = pd.to_numeric(df['left'], errors='coerce').dropna()
+            all_lefts.extend(valid_lefts.round(2).tolist())
 
     # Count frequencies
     left_counter = Counter(all_lefts)
@@ -68,7 +69,10 @@ def analyze_left_distribution(dflist):
     left_stats = sorted(left_counter.items(), key=lambda x: -x[1])
     left_stats_df = pd.DataFrame(left_stats, columns=['left', 'count'])
     left_stats_df['percentage'] = 100 * left_stats_df['count'] / total
-    left_stats_df['left'] = float(left_stats_df['left']).round(2)
+    # Make sure 'left' column is numeric and drop invalid rows
+    left_stats_df = left_stats_df[pd.to_numeric(left_stats_df['left'], errors='coerce').notnull()]
+    left_stats_df['left'] = left_stats_df['left'].astype(float).round(2)
+
 
     # Pick dominant left positions (e.g., >10% of lines)
     dominant_lefts = left_stats_df[left_stats_df['percentage'] > 10]['left'].tolist()
