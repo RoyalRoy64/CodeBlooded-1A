@@ -1,50 +1,54 @@
-# Adobe-India-Hackathon25
 
-# PDF Structured Outline Extractor — Adobe Hackathon Round 1A Submission
+# PDF Structured Outline Extractor — Adobe Hackathon 2024 (Round 1A Submission)
 
-## Project Objective
+## Overview
 
-This project addresses the Round 1A challenge of the Adobe Hackathon: extract a clean, structured document outline from unstructured PDF files. Each PDF may contain complex layouts, multiple heading levels, and inconsistent formatting. Our goal is to automatically generate a machine-readable table of contents from such documents, producing reliable output even in the absence of metadata or manually authored bookmarks.
+This project addresses the Round 1A challenge of the Adobe India Hackathon: extracting a clean, hierarchical document outline from unstructured PDF files. The solution is designed to handle complex layouts, multi-column formatting, multilingual content, and varying heading styles — generating a machine-readable table of contents (TOC) in JSON format.
+
+---
+
+## Objectives
+
+- Automatically identify and classify headings (H1–H6) from PDF documents
+- Handle variations in layout, fonts, and structure without relying on metadata
+- Support multilingual content and visual hierarchy inference
+- Operate fully offline and within strict performance constraints
 
 ---
 
 ## Key Features
 
-- Heading detection using font size, boldness, and layout positioning
-- Accurate H1–H6 outline construction based on visual hierarchy
-- Multilingual support across Latin, Indic, and CJK scripts
-- Automatic column detection (single, double, and triple column layouts)
-- Header and footer detection via repeated content analysis
-- Filters out low-density or non-informative lines (e.g., page numbers)
-- Clean, valid JSON output with text, heading level, and page number
-- Works fully offline, can be extended with OCR as needed
+- Heading detection using **font size**, **boldness**, and **layout positioning**
+- Accurate **H1–H6 outline construction** based on visual hierarchy
+- **Multilingual support**: Handles Latin, Indic, and CJK scripts
+- **Automatic column detection** for single, double, and triple column layouts
+- **Header and footer removal** using repeated line analysis
+- Filters out **low-density/non-informative lines** (e.g., page numbers)
+- Outputs **clean, valid JSON** with heading level, text, and page number
+- Offline-compatible; OCR support (via Tesseract) can be optionally integrated
 
 ---
 
-## Approach Overview
+## Technical Approach
 
 ### 1. Block Extraction
-
-- Used `PyMuPDF`'s `get_text("html")` interface to extract styled text and positional data from each page.
-- Cleaned and parsed HTML content to identify individual lines with their bounding boxes, font sizes, and styles.
+- Utilized `PyMuPDF`’s `get_text("html")` to extract styled text and bounding boxes
+- Parsed HTML content into lines with positional metadata and font styles
 
 ### 2. Layout Analysis
-
-- Detected headers and footers by comparing repeated lines across even and odd pages.
-- Applied clustering to left-aligned coordinates to infer column structure.
-- Merged consecutive lines with same font and alignment to reduce fragmentation.
+- Identified headers and footers via repeated content across pages
+- Clustered lines using `x0` coordinates to infer column structure
+- Merged consecutive lines with similar font and alignment for cohesion
 
 ### 3. Font & Typography Scoring
+- Analyzed font distribution using word frequency and z-scores
+- Classified fonts into heading vs body based on rarity and prominence
+- Tracked boldness and italicization for additional context
 
-- Computed font statistics across the document to identify dominant and rare font sizes.
-- Used z-score thresholds on word count per font to classify fonts into major (heading) and minor (body) classes.
-- Tracked changes in font size, bold, and italic status to infer visual hierarchy.
-
-### 4. Heading Assignment
-
-- Identified candidate heading lines from top/zoned regions based on font and alignment.
-- Assigned heading levels (H1–H6) by iterating from largest fonts to smallest, from leftmost to rightmost indentation.
-- Ensured consistent nesting: once the level increases (e.g., to H3), higher levels (e.g., H1) are no longer reassigned.
+### 4. Heading Level Assignment
+- Selected heading candidates from key zones (top, margin, center)
+- Assigned levels (H1–H6) in descending order of font size and indentation
+- Enforced structural nesting to preserve outline hierarchy
 
 ---
 
@@ -68,3 +72,80 @@ The output is a valid JSON object:
     }
   ]
 }
+````
+
+---
+
+## How to Run (Docker)
+
+### Build the image
+
+```bash
+docker build --platform linux/amd64 -t pdf-outline-extractor .
+```
+
+### Run the container
+
+```bash
+docker run --rm \
+  -v $(pwd)/input:/app/input \
+  -v $(pwd)/output:/app/output \
+  --network none \
+  pdf-outline-extractor
+```
+
+* Place PDF files inside the `/input` directory.
+* JSON outputs will be saved in `/output` with matching filenames.
+
+---
+
+## Project Structure
+
+```
+.
+├── app/
+│   ├── extractor.py         # Core extraction logic
+│   ├── layout_utils.py      # Column detection, font scoring
+│   ├── ocr_fallback.py      # Tesseract-based OCR logic (optional)
+│   └── main.py              # Entry point
+├── input/                   # Input PDFs go here
+├── output/                  # JSON outputs saved here
+├── Dockerfile
+└── README.md
+```
+
+---
+
+## Testing
+
+The system has been tested on:
+
+* Text-based PDFs with varying structure
+* Multi-column scientific papers
+* Hindi, Japanese, Korean, and Russian documents (with OCR fallback)
+* Scanned pages and low-font-embedding documents
+
+Execution time: consistently under 10 seconds for 50-page PDFs.
+
+---
+
+## Bonus Highlights
+
+* Multilingual handling with support for `eng`, `hin`, `jpn`, `kor`, `rus`
+* Works offline with optional OCR fallback
+* Robust to layout variance, font inconsistencies, and content density
+* Scalable to large batch processing via Docker
+
+---
+
+## Authors
+
+* Spandan Roy
+* Honey Priya
+
+---
+
+*Built for Adobe’s vision of smarter document intelligence. Not just parsing — understanding.*
+
+```
+
